@@ -1,76 +1,116 @@
-export async function translateText({ text, target, source = "en" }) {
-  if (!text || !target) {
-    throw new Error("Missing required parameters: text and target");
-  }
+// Google Translator 9 (RapidAPI) integration
+// Endpoints:
+// - POST /v2             -> translate
+// - POST /v2/detect      -> language detection
+// - GET  /v2/languages   -> supported languages
 
+const DEFAULT_HOST = "google-translator9.p.rapidapi.com";
+const DEFAULT_TRANSLATE_PATH = "/v2";
+const DEFAULT_DETECT_PATH = "/v2/detect";
+const DEFAULT_LANGUAGES_PATH = "/v2/languages";
+
+function getHost() {
+  return import.meta.env.VITE_RAPIDAPI_HOST || DEFAULT_HOST;
+}
+
+function getPaths() {
+  return {
+    translate:
+      import.meta.env.VITE_RAPIDAPI_TRANSLATE_PATH || DEFAULT_TRANSLATE_PATH,
+    detect: import.meta.env.VITE_RAPIDAPI_DETECT_PATH || DEFAULT_DETECT_PATH,
+    languages:
+      import.meta.env.VITE_RAPIDAPI_LANGUAGES_PATH || DEFAULT_LANGUAGES_PATH,
+  };
+}
+
+function getHeaders(apiHost) {
   const apiKey = import.meta.env.VITE_RAPIDAPI_KEY;
-  // Allow overriding the RapidAPI host and endpoint path via env.
-  // Defaults set to the Free Google Translator API host.
-  const apiHost =
-    import.meta.env.VITE_RAPIDAPI_HOST ||
-    "free-google-translator.p.rapidapi.com";
-  // Default path for the Free Google Translator API
-  const endpointPath =
-    import.meta.env.VITE_RAPIDAPI_ENDPOINT_PATH ||
-    "/external-api/free-google-translator";
-
   if (!apiKey) {
     throw new Error(
       "RapidAPI key is not set. Define VITE_RAPIDAPI_KEY in your .env file."
     );
   }
+  return {
+    "Content-Type": "application/json",
+    "X-RapidAPI-Key": apiKey,
+    "X-RapidAPI-Host": apiHost,
+  };
+}
 
-  // Build URL with query params per the API's cURL example
-  const url = new URL(`https://${apiHost}${endpointPath}`);
-  url.searchParams.set("from", source);
-  url.searchParams.set("to", target);
-  url.searchParams.set("query", text);
+export async function translateText({ text, target, source = "en" }) {
+  if (!text || !target) {
+    throw new Error("Missing required parameters: text and target");
+  }
+  const apiHost = getHost();
+  const { translate } = getPaths();
+  const url = `https://${apiHost}${translate}`;
 
-  const res = await fetch(url.toString(), {
+  const res = await fetch(url, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-RapidAPI-Key": apiKey,
-      "X-RapidAPI-Host": apiHost,
-    },
-    // Body as shown in provider's example
-    body: JSON.stringify({ translate: "rapidapi" }),
+    headers: getHeaders(apiHost),
+    body: JSON.stringify({
+      q: text,
+      target,
+      ...(source ? { source } : {}),
+      format: "text",
+    }),
   });
 
   if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Translation API error (${res.status}): ${text}`);
+    const t = await res.text();
+    throw new Error(`Translation API error (${res.status}): ${t}`);
   }
 
   const data = await res.json();
+  // Google-style response: { data: { translations: [ { translatedText: "..." } ] } }
+  const translated =
+    data?.data?.translations?.[0]?.translatedText ||
+    data?.data?.translated_text ||
+    data?.translated_text ||
+    data?.translation ||
+    data?.result ||
+    data?.text ||
+    data?.output;
 
-  // Try common response shapes used by RapidAPI wrappers
-  const candidates = [
-    data?.data?.translated_text,
-    data?.data?.translation,
-    data?.translated_text,
-    data?.translation,
-    data?.translated,
-    data?.result,
-    data?.text,
-    data?.output,
-  ];
-
-  let translated = candidates.find(
-    (v) => typeof v === "string" && v.length > 0
-  );
-
-  // If any candidate is an array, pick the first string item
-  if (!translated) {
-    const arrayCandidate = candidates.find((v) => Array.isArray(v) && v.length);
-    if (arrayCandidate) {
-      const first = arrayCandidate.find((v) => typeof v === "string");
-      if (first) translated = first;
-    }
-  }
-
-  if (!translated) {
+  if (!translated || typeof translated !== "string") {
     throw new Error("Unexpected API response format: " + JSON.stringify(data));
   }
   return translated;
+}
+
+export async function detectLanguage(text) {
+  if (!text) return null;
+  const apiHost = getHost();
+  const { detect } = getPaths();
+  const url = `https://${apiHost}${detect}`;
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: getHeaders(apiHost),
+    body: JSON.stringify({ q: text }),
+  });
+  if (!res.ok) return null;
+  const data = await res.json().catch(() => ({}));
+  // Google-style: { data: { detections: [[ { language, confidence } ]] } }
+  const first = data?.data?.detections?.[0]?.[0] || data?.data?.detections?.[0];
+  return first?.language || null;
+}
+
+export async function getSupportedLanguages(target = "en") {
+  const apiHost = getHost();
+  const { languages } = getPaths();
+  const url = new URL(`https://${apiHost}${languages}`);
+  if (target) url.searchParams.set("target", target);
+
+  const res = await fetch(url.toString(), {
+    method: "GET",
+    headers: getHeaders(apiHost),
+  });
+  if (!res.ok) {
+    const t = await res.text();
+    throw new Error(`Languages API error (${res.status}): ${t}`);
+  }
+  const data = await res.json();
+  // Google-style: { data: { languages: [ { language: 'es', name: 'Spanish' }, ... ] } }
+  return data?.data?.languages || [];
 }
