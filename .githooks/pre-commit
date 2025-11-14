@@ -1,0 +1,24 @@
+#!/bin/sh
+# Prevent accidental commits of common secret files
+staged_files=$(git diff --cached --name-only)
+for file in $staged_files; do
+  case "$file" in
+    .env|.env.local|*.env|**/.env|**/.env.local)
+      echo "ERROR: Attempt to commit environment file '$file' blocked by pre-commit hook."
+      echo "If you really want to commit, remove this hook or run: git commit --no-verify"
+      exit 1
+      ;;
+    *.pem|*.key|*.p12|id_rsa|id_dsa)
+      echo "ERROR: Attempt to commit private key '$file' blocked by pre-commit hook."
+      exit 1
+      ;;
+  esac
+done
+
+# Also scan staged content for literal API keys patterns (simple heuristic)
+if git diff --cached --name-only | xargs git show : | grep -E "(RAPIDAPI_KEY|VITE_RAPIDAPI_KEY|AKIA[0-9A-Z]{16})" >/dev/null 2>&1; then
+  echo "ERROR: Staged changes contain probable secret patterns (RAPIDAPI_KEY/VITE_RAPIDAPI_KEY). Remove them before committing."
+  exit 1
+fi
+
+exit 0
