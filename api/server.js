@@ -9,6 +9,15 @@ const __dirname = path.dirname(__filename);
 const app = express();
 app.use(express.json());
 
+// Startup warning if RAPIDAPI_KEY missing in environment (common on new deploys)
+const _startupEnv = getEnv();
+if (!_startupEnv.apiKey) {
+  // eslint-disable-next-line no-console
+  console.warn(
+    "[server] RAPIDAPI_KEY is not set. Set RAPIDAPI_KEY in your Render/host environment variables to enable translation proxy."
+  );
+}
+
 // In-memory cache and sliding-window rate limiter (single-instance only)
 const RATE_LIMIT_WINDOW_MS =
   Number(process.env.RATE_LIMIT_WINDOW_MS) || 60 * 1000; // 1 minute
@@ -136,7 +145,10 @@ app.post("/api/translate", async (req, res) => {
 
     const env = getEnv();
     if (!env.apiKey)
-      return res.status(500).json({ error: "Server misconfiguration" });
+      return res.status(503).json({
+        error: "Server misconfiguration: RAPIDAPI_KEY not set",
+        help: "Set RAPIDAPI_KEY in your Render (or host) environment variables and redeploy",
+      });
 
     const url = `https://${env.apiHost}${env.translatePath}`;
     const { ok, status, data } = await proxyPost(
@@ -187,7 +199,10 @@ app.post("/api/detect", async (req, res) => {
 
     const env = getEnv();
     if (!env.apiKey)
-      return res.status(500).json({ error: "Server misconfiguration" });
+      return res.status(503).json({
+        error: "Server misconfiguration: RAPIDAPI_KEY not set",
+        help: "Set RAPIDAPI_KEY in your Render (or host) environment variables and redeploy",
+      });
 
     const url = `https://${env.apiHost}${env.detectPath}`;
     const { ok, status, data } = await proxyPost(
@@ -236,7 +251,10 @@ app.get("/api/languages", async (req, res) => {
 
     const env = getEnv();
     if (!env.apiKey)
-      return res.status(500).json({ error: "Server misconfiguration" });
+      return res.status(503).json({
+        error: "Server misconfiguration: RAPIDAPI_KEY not set",
+        help: "Set RAPIDAPI_KEY in your Render (or host) environment variables and redeploy",
+      });
 
     const url = new URL(`https://${env.apiHost}${env.languagesPath}`);
     url.searchParams.set("target", target);

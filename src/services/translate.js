@@ -132,8 +132,22 @@ export async function translateText({ text, target, source = "en" }) {
         body: JSON.stringify({ text, target, source }),
       });
       if (!res.ok) {
-        const t = await res.text().catch(() => "");
-        const err = new Error(`Translate proxy error (${res.status}): ${t}`);
+        // Try parse JSON body to surface helpful server guidance
+        const txt = await res.text().catch(() => "");
+        let parsed = null;
+        try {
+          parsed = JSON.parse(txt || "{}");
+        } catch (e) {
+          parsed = null;
+        }
+        if (parsed && parsed.error && /misconfig/i.test(parsed.error)) {
+          const friendly = new Error(
+            "Server misconfiguration: translation proxy missing server key. Set RAPIDAPI_KEY in your host environment (Render) and redeploy."
+          );
+          friendly.status = res.status;
+          throw friendly;
+        }
+        const err = new Error(`Translate proxy error (${res.status}): ${txt}`);
         err.status = res.status;
         throw err;
       }
